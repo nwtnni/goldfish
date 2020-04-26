@@ -30,10 +30,12 @@ fn main() -> anyhow::Result<()> {
     match env::args().nth(1) {
     | Some(path) => {
         if let Ok(path) = path::Path::new(&path).canonicalize() {
-            let path = path.as_os_str().as_bytes();
-            history.write_all(path)?;
-            history.write_u16::<LittleEndian>(path.len() as u16)?;
-            history.flush()?;
+            if path.is_dir() {
+                let path = path.as_os_str().as_bytes();
+                history.write_all(path)?;
+                history.write_u16::<LittleEndian>(path.len() as u16)?;
+                history.flush()?;
+            }
         }
     }
     | None => {
