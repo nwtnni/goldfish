@@ -36,10 +36,7 @@ fn main() -> io::Result<()> {
         }
     }
     | None => {
-        let stdout = io::stdout();
-        let mut stdout = stdout.lock();
         let mut paths = IndexSet::with_hasher(FxBuildHasher::default());
-
         let mut buf = Vec::new();
         let mut pos = history
             .seek(io::SeekFrom::End(-2))
@@ -82,33 +79,28 @@ fn main() -> io::Result<()> {
             }
         }
 
+        // Write to stdout for consumption by other tools
+        {
+            let stdout = io::stdout();
+            let mut stdout = stdout.lock();
+            for path in &paths {
+                writeln!(&mut stdout, "{}", path)?;
+            }
+            stdout.flush()?;
+        }
+
         // If the excess memory usage is above the threshold, then compact
         // the log by rewriting only the relevant entries.
-        let compact = pos > COMPACTION_THRESHOLD;
-
-        if compact {
+        if pos > COMPACTION_THRESHOLD {
             history.seek(io::SeekFrom::Start(0))?;
             history.set_len(0)?;
-        }
-
-        paths.into_iter()
-            .rev()
-            .try_for_each(|path| {
-                // Write to log
-                if compact {
-                    history.write_all(path.as_bytes())?;
-                    history.write_u16::<LittleEndian>(path.len() as u16)?;
-                }
-
-                // Write to stdout for consumption by other tools
-                writeln!(&mut stdout, "{}", path)
-            })?;
-
-        if compact {
+            // Write to log
+            for path in paths.into_iter().rev() {
+                history.write_all(path.as_bytes())?;
+                history.write_u16::<LittleEndian>(path.len() as u16)?;
+            }
             history.flush()?;
         }
-
-        stdout.flush()?;
     }
     }
 
