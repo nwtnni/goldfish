@@ -8,22 +8,17 @@ use std::os::unix::ffi::OsStrExt;
 use std::str;
 use std::path;
 
-use anyhow::anyhow;
-use anyhow::Context;
 use byteorder::LittleEndian;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
 use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> io::Result<()> {
 
     let home = dirs::home_dir()
-        .ok_or_else(|| anyhow!("Could not find home directory"))?;
-
-    let home = home
-        .canonicalize()
-        .with_context(|| anyhow!("Could not canonicalize home directory: '{}'", home.display()))?;
+        .expect("Could not find home directory")
+        .canonicalize()?;
 
     let mut history = load_history()?;
 
@@ -122,14 +117,13 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_history() -> anyhow::Result<fs::File> {
+fn load_history() -> io::Result<fs::File> {
     let mut path = dirs::data_local_dir()
-        .ok_or_else(|| anyhow!("Could not find local data directory"))?;
+        .expect("Could not find local data directory");
 
     path.push("dvd");
 
-    fs::create_dir_all(&path)
-        .with_context(|| anyhow!("Could not create local data directory: '{}'", path.display()))?;
+    fs::create_dir_all(&path)?;
 
     path.push("history");
 
@@ -138,5 +132,4 @@ fn load_history() -> anyhow::Result<fs::File> {
         .append(true)
         .create(true)
         .open(&path)
-        .with_context(|| anyhow!("Could not open local data directory: '{}'", path.display()))
 }
