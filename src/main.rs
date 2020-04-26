@@ -7,7 +7,6 @@ use std::path;
 
 use anyhow::anyhow;
 use anyhow::Context;
-use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 use structopt::StructOpt;
 
@@ -114,7 +113,7 @@ fn append(mut log: log::Log, entry: String, r#type: Option<Type>) -> io::Result<
 
 fn report(mut log: log::Log, count: usize, threshold: u64) -> io::Result<()> {
 
-    let mut cache = IndexSet::with_hasher(FxBuildHasher::default());
+    let mut cache = IndexSet::new();
     let mut entries = log.iter();
 
     // Scan backward through the log
