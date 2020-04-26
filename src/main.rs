@@ -14,6 +14,12 @@ use byteorder::WriteBytesExt;
 use fxhash::FxBuildHasher;
 use indexmap::IndexSet;
 
+/// Maximum number of directories in the LRU cache that this tool will output.
+const CACHE_SIZE: usize = 100;
+
+/// Maximum size (in bytes) of stale log entries before the log is rewritten.
+const COMPACTION_THRESHOLD: u64 = 8 * 1024;
+
 fn main() -> io::Result<()> {
 
     let home = dirs::home_dir()
@@ -44,7 +50,7 @@ fn main() -> io::Result<()> {
             .unwrap_or(0);
 
         // Scan backward through the log
-        while pos > 0 && paths.len() < 5 {
+        while pos > 0 && paths.len() < CACHE_SIZE {
 
             // |   /|0x01|0x00|   /|   b|   a|   r|0x04|0x00|
             //                                    ^
@@ -80,9 +86,9 @@ fn main() -> io::Result<()> {
             }
         }
 
-        // If the excess space is above the threshold, then compact
+        // If the excess memory usage is above the threshold, then compact
         // the log by rewriting only the relevant entries.
-        let compact = pos > 2u64.pow(10);
+        let compact = pos > COMPACTION_THRESHOLD;
 
         if compact {
             history.seek(io::SeekFrom::Start(0))?;
