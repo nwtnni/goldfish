@@ -41,22 +41,42 @@ fn main() -> anyhow::Result<()> {
     | None => {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
+        let mut paths = IndexSet::with_hasher(FxBuildHasher::default());
 
         let mut buf = Vec::new();
-        let mut pos = history.seek(io::SeekFrom::End(0))?;
-        let mut paths: IndexSet<String, _> = IndexSet::with_hasher(FxBuildHasher::default());
+        let mut pos = history
+            .seek(io::SeekFrom::End(-2))
+            .unwrap_or(0);
 
+        // Scan backward through the log
         while pos > 0 && paths.len() < 5 {
-            history.seek(io::SeekFrom::Current(-2))?;
+
+            // |   /|0x01|0x00|   /|   b|   a|   r|0x04|0x00|
+            //                                    ^
 
             let len = history.read_u16::<LittleEndian>()?;
 
-            buf.clear();
-            buf.resize(len as usize, 0);
+            // |   /|0x01|0x00|   /|   b|   a|   r|0x04|0x00|
+            //                                              ^
 
             history.seek(io::SeekFrom::Current(-2 - (len as i64)))?;
+
+            // |   /|0x01|0x00|   /|   b|   a|   r|0x04|0x00|
+            //                ^
+
+            buf.clear();
+            buf.resize(len as usize, 0);
             history.read_exact(&mut buf[..])?;
-            pos = history.seek(io::SeekFrom::Current(-(len as i64)))?;
+
+            // |   /|0x01|0x00|   /|   b|   a|   r|0x04|0x00|
+            //                                    ^
+
+            pos = history
+                .seek(io::SeekFrom::Current(-2 -(len as i64)))
+                .unwrap_or(0);
+
+            // |   /|0x01|0x00|   /|   b|   a|   r|0x04|0x00|
+            //      ^
 
             if let Ok(path) = str::from_utf8(&buf) {
                 if !paths.contains(&*path) {
