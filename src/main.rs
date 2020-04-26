@@ -1,15 +1,20 @@
 use std::env;
 use std::fs;
 use std::io;
-use std::io::BufRead;
-use std::io::BufReader;
+use std::io::Read;
+use std::io::Seek;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
+use std::str;
 use std::path;
 
 use anyhow::anyhow;
 use anyhow::Context;
-use fxhash::FxHashSet;
+use byteorder::LittleEndian;
+use byteorder::ReadBytesExt;
+use byteorder::WriteBytesExt;
+use fxhash::FxBuildHasher;
+use indexmap::IndexSet;
 
 fn main() -> anyhow::Result<()> {
 
@@ -25,8 +30,9 @@ fn main() -> anyhow::Result<()> {
     match env::args().nth(1) {
     | Some(path) => {
         if let Ok(path) = path::Path::new(&path).canonicalize() {
-            history.write_all(path.as_os_str().as_bytes())?;
-            history.write(&[b'\n'])?;
+            let path = path.as_os_str().as_bytes();
+            history.write_all(path)?;
+            history.write_u16::<LittleEndian>(path.len() as u16)?;
             history.flush()?;
         }
     }
@@ -34,12 +40,37 @@ fn main() -> anyhow::Result<()> {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
 
-        BufReader::new(history)
-            .lines()
-            .filter_map(Result::ok)
-            .collect::<FxHashSet<_>>()
-            .into_iter()
+        let mut buf = Vec::new();
+        let mut pos = history.seek(io::SeekFrom::End(0))?;
+        let mut paths: IndexSet<String, _> = IndexSet::with_hasher(FxBuildHasher::default());
+
+        while pos > 0 && paths.len() < 5 {
+            history.seek(io::SeekFrom::Current(-2))?;
+
+            let len = history.read_u16::<LittleEndian>()?;
+
+            buf.clear();
+            buf.resize(len as usize, 0);
+
+            history.seek(io::SeekFrom::Current(-2 - (len as i64)))?;
+            history.read_exact(&mut buf[..])?;
+            pos = history.seek(io::SeekFrom::Current(-(len as i64)))?;
+
+            if let Ok(path) = str::from_utf8(&buf) {
+                if !paths.contains(&*path) {
+                    paths.insert(path.to_owned());
+                }
+            }
+        }
+
+        history.seek(io::SeekFrom::Start(0))?;
+        history.set_len(0)?;
+
+        paths.into_iter()
+            .rev()
             .try_for_each(|path| {
+                history.write_all(path.as_bytes())?;
+                history.write_u16::<LittleEndian>(path.len() as u16)?;
                 match path::Path::new(&path).strip_prefix(&home) {
                 | Ok(path) if path == path::Path::new("") => writeln!(&mut stdout, "~"),
                 | Ok(path) => writeln!(&mut stdout, "~/{}", path.display()),
@@ -47,6 +78,7 @@ fn main() -> anyhow::Result<()> {
                 }
             })?;
 
+        history.flush()?;
         stdout.flush()?;
     }
     }

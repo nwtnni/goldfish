@@ -97,8 +97,10 @@ name = "dvd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "byteorder",
  "dirs",
  "fxhash",
+ "indexmap",
 ]
 
 [[package]]
@@ -119,6 +121,15 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
+]
+
+[[package]]
+name = "indexmap"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "076f042c5b7b98f31d205f1249267e12a6518c1481e9dae9764af19b707d2292"
+dependencies = [
+ "autocfg",
 ]
 
 [[package]]
