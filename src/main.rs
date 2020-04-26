@@ -63,14 +63,25 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        history.seek(io::SeekFrom::Start(0))?;
-        history.set_len(0)?;
+        // If the excess space is above the threshold, then compact
+        // the log by rewriting only the relevant entries.
+        let compact = pos > 2u64.pow(10);
+
+        if compact {
+            history.seek(io::SeekFrom::Start(0))?;
+            history.set_len(0)?;
+        }
 
         paths.into_iter()
             .rev()
             .try_for_each(|path| {
-                history.write_all(path.as_bytes())?;
-                history.write_u16::<LittleEndian>(path.len() as u16)?;
+                // Write to log
+                if compact {
+                    history.write_all(path.as_bytes())?;
+                    history.write_u16::<LittleEndian>(path.len() as u16)?;
+                }
+
+                // Write to stdout for consumption by other tools
                 match path::Path::new(&path).strip_prefix(&home) {
                 | Ok(path) if path == path::Path::new("") => writeln!(&mut stdout, "~"),
                 | Ok(path) => writeln!(&mut stdout, "~/{}", path.display()),
@@ -78,7 +89,10 @@ fn main() -> anyhow::Result<()> {
                 }
             })?;
 
-        history.flush()?;
+        if compact {
+            history.flush()?;
+        }
+
         stdout.flush()?;
     }
     }
