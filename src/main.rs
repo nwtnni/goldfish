@@ -85,7 +85,7 @@ impl History {
     pub fn load() -> io::Result<Self> {
         let mut path = dirs::data_local_dir()
             .expect("Could not find local data directory");
-        path.push("dvd");
+        path.push("lru");
         fs::create_dir_all(&path)?;
         path.push("history");
         fs::OpenOptions::new()
