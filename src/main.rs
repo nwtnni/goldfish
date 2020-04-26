@@ -22,10 +22,6 @@ const COMPACTION_THRESHOLD: u64 = 8 * 1024;
 
 fn main() -> io::Result<()> {
 
-    let home = dirs::home_dir()
-        .expect("Could not find home directory")
-        .canonicalize()?;
-
     let mut history = load_history()?;
 
     match env::args().nth(1) {
@@ -105,11 +101,7 @@ fn main() -> io::Result<()> {
                 }
 
                 // Write to stdout for consumption by other tools
-                match path::Path::new(&path).strip_prefix(&home) {
-                | Ok(path) if path == path::Path::new("") => writeln!(&mut stdout, "~"),
-                | Ok(path) => writeln!(&mut stdout, "~/{}", path.display()),
-                | Err(_) => writeln!(&mut stdout, "{}", path),
-                }
+                writeln!(&mut stdout, "{}", path)
             })?;
 
         if compact {
