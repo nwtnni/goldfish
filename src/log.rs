@@ -83,7 +83,7 @@ impl Log {
 
     /// Return an ordered set of the latest entries in the log.
     pub fn entries(&mut self, count: usize) -> anyhow::Result<IndexSet<String>> {
-        let mut cache = IndexSet::new();
+        let mut cache = IndexSet::with_capacity(count);
         let mut iter = self.iter();
 
         // Scan backward through the log
