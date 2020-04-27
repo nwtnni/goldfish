@@ -4,23 +4,35 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::Write;
 use std::path;
+use std::str;
 
 use anyhow::anyhow;
 use anyhow::Context;
 use byteorder::LittleEndian;
 use byteorder::ReadBytesExt;
 use byteorder::WriteBytesExt;
+use indexmap::IndexSet;
+
+macro_rules! try_with_context {
+    (CONTEXT: $context:expr; $($statement:stmt;)*) => {
+        (|| -> io::Result<()> {
+            $($statement)*
+            Ok(())
+        })().with_context(|| $context)
+    }
+}
 
 #[derive(Debug)]
-pub struct Log(fs::File);
+pub struct Log {
+    path: path::PathBuf,
+    file: fs::File,
+}
 
 impl Log {
     /// Load the log file at `path`, or create one if it doesn't exist.
     ///
     /// WARNING: this function does **not** verify that `path` is a valid log file.
-    pub fn load<P: AsRef<path::Path>>(path: P) -> anyhow::Result<Self> {
-        let path = path.as_ref();
-
+    pub fn load(path: path::PathBuf) -> anyhow::Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(&parent)
                 .with_context(|| anyhow!("Could not create directory: '{}'", parent.display()))?;
@@ -31,30 +43,71 @@ impl Log {
             .append(true)
             .create(true)
             .open(&path)
-            .map(Log)
             .with_context(|| anyhow!("Could not open log file: '{}'", path.display()))
+            .map(|file| Log { file, path })
     }
 
     /// Append `entry` to the underlying log file.
-    pub fn append<E: AsRef<[u8]>>(&mut self, entry: E) -> io::Result<()> {
-        let entry = entry.as_ref();
-        self.0.write_all(entry)?;
-        self.0.write_u16::<LittleEndian>(entry.len() as u16)?;
-        Ok(())
+    pub fn append<E: AsRef<[u8]>>(&mut self, entry: E) -> anyhow::Result<()> {
+        try_with_context! {
+            CONTEXT: anyhow!("Could not append to log file: `{}`", self.path.display());
+            let entry = entry.as_ref();
+            self.file.write_all(entry)?;
+            self.file.write_u16::<LittleEndian>(entry.len() as u16)?;
+        }
     }
     
     /// Clear the underlying log file.
-    pub fn clear(&mut self) -> io::Result<()> {
-        self.0.seek(io::SeekFrom::Start(0))?;
-        self.0.set_len(0)?;
-        Ok(())
+    pub fn clear(&mut self) -> anyhow::Result<()> {
+        try_with_context! {
+            CONTEXT: anyhow!("Could not clear log file: `{}`", self.path.display());
+            let _ = self.file.seek(io::SeekFrom::Start(0))?;
+            self.file.set_len(0)?;
+        }
+    }
+
+    /// Delete the underlying log file.
+    pub fn delete(self) -> anyhow::Result<()> {
+        fs::remove_file(&self.path)
+            .with_context(|| anyhow!("Could not delete log file: `{}`", self.path.display()))
     }
 
     /// Finalize changes by flushing to disk.
-    pub fn sync(&mut self) -> io::Result<()> {
-        self.0.flush()?;
-        self.0.sync_data()?;
-        Ok(())
+    pub fn sync(&mut self) -> anyhow::Result<()> {
+        try_with_context! {
+            CONTEXT: anyhow!("Could not flush log file to disk: `{}`", self.path.display());
+            self.file.flush()?;
+            self.file.sync_data()?;
+        }
+    }
+
+    /// Return an ordered set of the latest entries in the log.
+    pub fn entries(&mut self, count: usize) -> anyhow::Result<IndexSet<String>> {
+        let mut cache = IndexSet::new();
+        let mut iter = self.iter();
+
+        // Scan backward through the log
+        while let Some(entry) = iter.prev()?  {
+            match str::from_utf8(&entry) {
+            | Ok(entry) if !cache.contains(&*entry) => {
+                cache.insert(entry.to_owned());
+            }
+            | _ => (),
+            }
+            if cache.len() == count {
+                break;
+            }
+        }
+
+        Ok(cache)
+    }
+
+    /// Return the number of bytes between the beginning of the log file and
+    /// the current seek position.
+    pub fn position(&mut self) -> anyhow::Result<u64> {
+        self.file
+            .seek(io::SeekFrom::Current(0))
+            .with_context(|| anyhow!("Could not seek in log file: `{}`", self.path.display()))
     }
 
     /// Return a pseudo-iterator over this log's entries in **reverse** order,
@@ -75,13 +128,13 @@ impl Log {
     ///
     /// [it]: https://doc.rust-lang.org/std/iter/trait.Iterator.html
     /// [gat]: https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md
-    pub fn iter(&mut self) -> Iter<'_> {
+    fn iter(&mut self) -> Iter<'_> {
         Iter {
             buf: Vec::new(),
-            pos: self.0
+            pos: self.file
                 .seek(io::SeekFrom::End(-2))
                 .unwrap_or(0),
-            log: &mut self.0
+            log: &mut self.file
         }
     }
 }
@@ -128,11 +181,5 @@ impl<'h> Iter<'h> {
         //      ^
         
         Ok(Some(&self.buf))
-    }
-
-    /// Return the number of bytes between the beginning of the log file and
-    /// the current position.
-    pub fn len(&self) -> u64 {
-        self.pos
     }
 }

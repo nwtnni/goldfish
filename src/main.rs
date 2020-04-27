@@ -16,28 +16,50 @@ mod log;
 #[derive(StructOpt)]
 #[structopt(name = "lru")]
 struct Opt {
-    /// Maximum entries in the cache
-    #[structopt(short, long, default_value = "100")]
-    count: usize,
+    /// Cache to read from or write to
+    #[structopt(short, long)]
+    cache: Option<String>,
 
     /// Directory to store cache files
     #[structopt(short, long)]
     dir: Option<path::PathBuf>,
 
-    /// Cache file (relative to `dir`) to read from or write to
-    #[structopt(short, long)]
-    file: Option<path::PathBuf>,
+    /// Operation to perform on cache
+    #[structopt(subcommand)]
+    command: Command,
+}
 
-    /// Maximum bytes of stale cache entries before compaction
-    #[structopt(short = "b", long, default_value = "1024")]
-    threshold: u64,
+#[derive(StructOpt)]
+enum Command {
+    /// Clean the underlying log file by removing stale entries
+    Clean {
+        /// Maximum cache entries to retain
+        ///
+        /// If this is zero, then the file will be deleted
+        #[structopt(default_value = "256")]
+        count: usize,
+    },
 
-    /// Validation to filter cache entries
-    #[structopt(short, long)]
-    r#type: Option<Type>,
+    /// Print all newline-separated cache entries
+    Get {
+        /// Maximum bytes of stale cache entries before compaction
+        #[structopt(short, long, default_value = "8192")]
+        threshold: u64,
 
-    /// Update the cache with `entry` or else report all entries in the cache
-    entry: Option<String>,
+        /// Maximum cache entries to print
+        #[structopt(default_value = "256")]
+        count: usize,
+    },
+
+    /// Update the cache with `entry` as the most recent
+    Put {
+        /// Validate and transform `entry` as `type`
+        #[structopt(short, long)]
+        r#type: Option<Type>,
+
+        /// Cache entry to put
+        entry: String,
+    },
 }
 
 #[derive(Copy, Clone)]
@@ -79,24 +101,62 @@ fn main() -> anyhow::Result<()> {
 
     path.push("lru");
 
-    match (opt.file, opt.r#type) {
-    | (None, None) => path.push("history"),
-    | (None, Some(Type::Directory)) => path.push("directories"),
-    | (None, Some(Type::File)) => path.push("files"),
-    | (Some(file), _) => path.push(file),
+    match opt.cache {
+    | None => path.push("default"),
+    | Some(cache) => path.push(cache),
     }
 
-    let log = log::Log::load(&path)?;
+    let log = log::Log::load(path)?;
 
-    match opt.entry {
-    | Some(entry) => append(log, entry, opt.r#type)
-        .with_context(|| anyhow!("Could not write to log file: `{}`", path.display())),
-    | None => report(log, opt.count, opt.threshold)
-        .with_context(|| anyhow!("Could not report from log file: `{}`", path.display())),
+    match opt.command {
+    | Command::Clean { count } => clean(log, count, None)
+        .context("Could not clean cache"),
+    | Command::Get { count, threshold } => get(log, count, threshold)
+        .context("Could not get cache contents"),
+    | Command::Put { r#type, entry } => put(log, r#type, entry)
+        .context("Could not put cache entry"),
     }
 }
 
-fn append(mut log: log::Log, entry: String, r#type: Option<Type>) -> io::Result<()> {
+fn clean(mut log: log::Log, count: usize, entries: Option<IndexSet<String>>) -> anyhow::Result<()> {
+    if count == 0 {
+        return log.delete();
+    }
+
+    let entries = match entries {
+    | None => log.entries(count)?,
+    | Some(entries) => entries,
+    };
+
+    log.clear()?;
+    entries.into_iter()
+        .rev()
+        .try_for_each(|entry| log.append(entry))?;
+    log.sync()
+}
+
+fn get(mut log: log::Log, count: usize, threshold: u64) -> anyhow::Result<()> {
+
+    let entries = log.entries(count)?;
+
+    // Write to `stdout`
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    for entry in &entries {
+        writeln!(&mut stdout, "{}", entry)?;
+    }
+    stdout.flush()?;
+    drop(stdout);
+
+    // Compact the log by rewriting only the relevant entries
+    if log.position()? > threshold {
+        clean(log, count, Some(entries))?;
+    }
+
+    Ok(())
+}
+
+fn put(mut log: log::Log, r#type: Option<Type>, entry: String) -> anyhow::Result<()> {
     let entry = match r#type {
     | None => ffi::OsString::from(entry),
     | Some(r#type) => {
@@ -107,46 +167,5 @@ fn append(mut log: log::Log, entry: String, r#type: Option<Type>) -> io::Result<
     }
     };
     log.append(entry.as_bytes())?;
-    log.sync()?;
-    Ok(())
-}
-
-fn report(mut log: log::Log, count: usize, threshold: u64) -> io::Result<()> {
-
-    let mut cache = IndexSet::new();
-    let mut entries = log.iter();
-
-    // Scan backward through the log
-    while let Some(entry) = entries.prev()?  {
-        match str::from_utf8(&entry) {
-        | Ok(entry) if !cache.contains(&*entry) => {
-            cache.insert(entry.to_owned());
-        }
-        | _ => (),
-        }
-        if cache.len() > count {
-            break;
-        }
-    }
-
-    // Write to `stdout`
-    {
-        let stdout = io::stdout();
-        let mut stdout = stdout.lock();
-        for entry in &cache {
-            writeln!(&mut stdout, "{}", entry)?;
-        }
-        stdout.flush()?;
-    }
-
-    // Compact the log by rewriting only the relevant entries
-    if entries.len() > threshold {
-        log.clear()?;
-        for entry in cache.into_iter().rev() {
-            log.append(entry)?;
-        }
-        log.sync()?;
-    }
-
-    Ok(())
+    log.sync()
 }

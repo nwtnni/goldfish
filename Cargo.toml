@@ -12,3 +12,33 @@ byteorder = "1.3.4"
 dirs = "2.0.2"
 indexmap = "1.3.2"
 structopt = "0.3.14"
+
+[profile.release.package.heck]
+opt-level = 0
+
+[profile.release.package.syn]
+opt-level = 0
+
+[profile.release.package.quote]
+opt-level = 0
+
+[profile.release.package.unicode-xid]
+opt-level = 0
+
+[profile.release.package.proc-macro-error]
+opt-level = 0
+
+[profile.release.package.proc-macro-error-attr]
+opt-level = 0
+
+[profile.release.package.proc-macro2]
+opt-level = 0
+
+[profile.release.package.structopt-derive]
+opt-level = 0
+
+[profile.release.package.syn-mid]
+opt-level = 0
+
+[profile.release.package.version_check]
+opt-level = 0
