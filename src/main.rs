@@ -14,7 +14,7 @@ mod log;
 
 /// Implements a basic LRU cache for file paths or text.
 #[derive(StructOpt)]
-#[structopt(name = "lru")]
+#[structopt(name = "goldfish")]
 struct Opt {
     /// Cache to read from or write to
     #[structopt(short, long)]
@@ -99,7 +99,7 @@ fn main() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow!("Could not retrieve data local diretory"))
         .context("Try passing the `-d` or `--dir` flag to manually specify a directory")?;
 
-    path.push("lru");
+    path.push("goldfish");
 
     match opt.cache {
     | None => path.push("default"),
