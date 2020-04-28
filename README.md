@@ -34,7 +34,7 @@ o() {
     dir=$(goldfish --cache directories get | fzf)
     if [ ! -z "$dir" ]; then o "$dir"; fi
   else
-    cd "$1" && ls && goldfish --cache directories put --type dir "$1"
+    goldfish --cache directories put --type dir "$1" && cd "$1" && ls
   fi
 }
 ```
